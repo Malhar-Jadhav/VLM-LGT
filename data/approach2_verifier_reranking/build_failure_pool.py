@@ -14,8 +14,11 @@
 
 import argparse
 import os
+from pathlib import Path
 
+from data.approach2_verifier_reranking.candidates import sample_candidates
 from data.approach2_verifier_reranking.dataset_config import FAILURE_POOL_DIR_NAME
+from data.approach2_verifier_reranking.schema import make_pool_record
 from data.common.utils import read_jsonl, write_jsonl
 from models.load_model import load_qwen3_vl
 
@@ -23,29 +26,7 @@ PROCESSED_DIR = os.path.join(os.path.dirname(__file__), "processed")
 POOL_DIR = os.path.join(os.path.dirname(__file__), FAILURE_POOL_DIR_NAME)
 
 
-def sample_candidates(model, processor, example: dict, k: int) -> list:
-    """Sample k candidate traces from the policy model for one example.
-
-    Each candidate should end up as a dictionary holding the generated
-    answer or grounding box together with whether it matched the ground
-    truth, so the verifier can later be trained on both correct and
-    incorrect candidates from the same pool. The generation call itself
-    is left as a placeholder until the candidate format for this
-    experiment (crop, box, or answer) is decided; wire it up using the
-    same chat template and generation logic as models/run_inference.py.
-    """
-    candidates = []
-    for _ in range(k):
-        candidates.append(
-            {
-                "prediction": None,
-                "is_correct": None,
-            }
-        )
-    return candidates
-
-
-def build_pool_for_dataset(name: str, size: str, k: int) -> None:
+def build_pool_for_dataset(name: str, size: str, k: int, limit: int = None) -> None:
     """Build a failure-inclusive candidate pool for one preprocessed dataset.
 
     Reads the normalized examples produced by preprocess.py, samples k
@@ -59,12 +40,16 @@ def build_pool_for_dataset(name: str, size: str, k: int) -> None:
         return
 
     examples = read_jsonl(in_path)
+    if limit is not None:
+        examples = examples[:limit]
     model, processor = load_qwen3_vl(size)
 
     pool_records = []
-    for example in examples:
-        candidates = sample_candidates(model, processor, example, k)
-        pool_records.append({**example, "candidates": candidates})
+    crop_dir = Path(POOL_DIR) / "crops" / name
+    for index, example in enumerate(examples, start=1):
+        candidates = sample_candidates(model, processor, example, k, crop_dir=crop_dir)
+        pool_records.append(make_pool_record(example, candidates))
+        print(f"[sample] {name}: {index}/{len(examples)} examples")
 
     out_path = os.path.join(POOL_DIR, f"{name}_pool.jsonl")
     write_jsonl(pool_records, out_path)
@@ -81,9 +66,15 @@ def main() -> None:
         "--size", choices=["2b", "4b"], default="2b", help="Policy model size to sample from."
     )
     parser.add_argument("--k", type=int, default=4, help="Number of candidates to sample per example.")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Optional cap for a quick smoke experiment before sampling the full split.",
+    )
     args = parser.parse_args()
 
-    build_pool_for_dataset(args.dataset, args.size, args.k)
+    build_pool_for_dataset(args.dataset, args.size, args.k, args.limit)
 
 
 if __name__ == "__main__":

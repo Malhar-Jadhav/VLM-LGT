@@ -14,8 +14,10 @@
 
 import argparse
 import os
+from pathlib import Path
 
 from datasets import load_from_disk
+from PIL import Image
 
 from data.approach2_verifier_reranking.dataset_config import (
     OOD_DATASETS,
@@ -25,6 +27,7 @@ from data.common.utils import write_jsonl
 
 RAW_DIR = os.path.join(os.path.dirname(__file__), "raw")
 PROCESSED_DIR = os.path.join(os.path.dirname(__file__), "processed")
+IMAGE_DIR = os.path.join(PROCESSED_DIR, "images")
 
 
 def normalize_grounding_example(example: dict, source: str) -> dict:
@@ -59,7 +62,24 @@ def normalize_vqa_example(example: dict, source: str) -> dict:
     }
 
 
-def preprocess_group(dataset_names: dict, normalize_fn, split_out_dir: str) -> None:
+def materialize_image(image, source: str, split_name: str, index: int) -> str:
+    """Save a dataset image locally and return a JSON-serializable path.
+
+    Hugging Face image columns commonly decode to PIL Images. A PIL object
+    cannot be written to JSONL, so Approach 2 materializes it once during
+    preprocessing and stores the path used by policy and verifier scripts.
+    """
+    if isinstance(image, str):
+        return image
+    if not isinstance(image, Image.Image):
+        raise TypeError(f"{source}:{split_name}:{index} has unsupported image type {type(image)!r}")
+    Path(IMAGE_DIR).mkdir(parents=True, exist_ok=True)
+    image_path = Path(IMAGE_DIR) / f"{source}_{split_name}_{index:07d}.png"
+    image.convert("RGB").save(image_path)
+    return str(image_path)
+
+
+def preprocess_group(dataset_names: dict, normalize_fn, split_out_dir: str, limit: int = None) -> None:
     """Load each raw dataset in a group and write it out in the shared format.
 
     dataset_names maps a short dataset name to its DatasetEntry metadata
@@ -77,7 +97,16 @@ def preprocess_group(dataset_names: dict, normalize_fn, split_out_dir: str) -> N
         dataset = load_from_disk(raw_path)
 
         for split_name, split_data in dataset.items():
-            records = [normalize_fn(example, name) for example in split_data]
+            if limit is not None:
+                split_data = split_data.select(range(min(limit, len(split_data))))
+            records = []
+            for index, example in enumerate(split_data):
+                record = normalize_fn(example, name)
+                record["example_id"] = f"{name}:{split_name}:{index}"
+                record["image_path"] = materialize_image(
+                    record.pop("image"), name, split_name, index
+                )
+                records.append(record)
             out_path = os.path.join(split_out_dir, f"{name}_{split_name}.jsonl")
             write_jsonl(records, out_path)
             print(f"  wrote {len(records)} examples to {out_path}")
@@ -93,12 +122,18 @@ def main() -> None:
         choices=["training", "ood"],
         help="Which dataset groups to preprocess.",
     )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Optional per-split cap for a small smoke experiment.",
+    )
     args = parser.parse_args()
 
     if "training" in args.groups:
-        preprocess_group(TRAINING_DATASETS, normalize_grounding_example, PROCESSED_DIR)
+        preprocess_group(TRAINING_DATASETS, normalize_grounding_example, PROCESSED_DIR, args.limit)
     if "ood" in args.groups:
-        preprocess_group(OOD_DATASETS, normalize_vqa_example, PROCESSED_DIR)
+        preprocess_group(OOD_DATASETS, normalize_vqa_example, PROCESSED_DIR, args.limit)
 
 
 if __name__ == "__main__":

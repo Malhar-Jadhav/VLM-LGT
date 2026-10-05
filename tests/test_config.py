@@ -14,6 +14,13 @@ from data.approach1_latent_self_correction import dataset_config as approach1_co
 from data.approach2_verifier_reranking import dataset_config as approach2_config
 from data.common.dataset_entry import DatasetEntry
 from models.model_config import MODEL_VARIANTS, get_variant
+from tests.test_approach2 import (
+    test_answer_labeling_supports_aliases,
+    test_candidate_specs_are_controlled_and_label_free,
+    test_metrics_compare_same_candidate_pool,
+    test_response_parser_keeps_rationale_and_final_answer,
+    test_verifier_parser_bounds_score,
+)
 
 
 def test_model_variants_have_repo_ids():

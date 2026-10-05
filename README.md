@@ -102,6 +102,58 @@ scale before you build on top of it.
 
    The same pattern applies under `data/approach2_verifier_reranking/`.
 
+## Approach 2: verifier reranking
+
+Approach 2 now has a complete first baseline pipeline. It deliberately keeps
+the expensive model runs separate from the local, network-free checks:
+
+1. `preprocess.py` writes JSONL examples with an `image_path`, rather than
+   trying to serialize decoded image objects.
+2. `build_failure_pool.py` runs the policy K times per example and preserves
+   every labeled candidate trace, including wrong answers.
+3. `models/run_verifier_reranking.py` loads a separate verifier VLM, scores
+   each saved trace from the image evidence and candidate answer, selects the
+   highest score, and writes the required metrics.
+
+### Local checks
+
+These commands do not download a model or a dataset. Run them on a laptop
+before submitting an ICE PACE job:
+
+```
+python -m tests.test_config
+```
+
+### ICE PACE smoke run
+
+Run the first end-to-end test on a small training split subset. Use `2b` for
+both the policy and verifier while debugging, then repeat the final experiment
+with the desired model sizes. Run these from the repository root after the
+PACE environment has installed `requirements.txt` and authenticated with
+Hugging Face if needed:
+
+```
+python -m data.approach2_verifier_reranking.download --groups training
+python -m data.approach2_verifier_reranking.preprocess --groups training --limit 100
+python -m data.approach2_verifier_reranking.build_failure_pool \
+  --dataset gqa --size 2b --k 4 --limit 20
+python -m models.run_verifier_reranking \
+  --pool data/approach2_verifier_reranking/failure_pool/gqa_pool.jsonl \
+  --verifier-size 2b --limit 20 --output-dir results/approach2/gqa_smoke
+```
+
+The first verifier is a **prompted visual verifier**: it is a separately loaded
+Qwen3-VL call that checks the image/crop, question, and candidate answer and
+returns a bounded evidence-support score. This establishes the full candidate
+pool → score → rerank → evaluate loop. The saved trace schema and verifier
+interface make it possible to replace it later with a fine-tuned critic while
+keeping the same evaluation protocol.
+
+The resulting `metrics.json` reports `single_pass_accuracy`,
+`random_from_pool_accuracy`, `verifier_selected_accuracy`,
+`oracle_best_of_k_accuracy`, `selection_gain`, and `oracle_gap`. Random and
+verifier selection always use the exact same saved candidate pool.
+
 4. Check that the configs are still sane before a long download run:
 
    ```

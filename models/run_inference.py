@@ -9,11 +9,9 @@
 #     python -m models.run_inference --size 4b --image path/to/image.jpg \
 #         --question "What is happening in this image?"
 
+from __future__ import annotations
+
 import argparse
-
-from PIL import Image
-
-from models.load_model import load_qwen3_vl
 
 
 def build_messages(image: Image.Image, question: str) -> list:
@@ -42,7 +40,13 @@ def run_inference(size: str, image_path: str, question: str, max_new_tokens: int
     can be imported and reused by dataset or evaluation scripts, not
     just the CLI below.
     """
+    # Delay the heavyweight import so helper functions can be tested on a
+    # machine that has not installed the GPU runtime yet.
+    from models.load_model import load_qwen3_vl
+
     model, processor = load_qwen3_vl(size)
+    from PIL import Image
+
     image = Image.open(image_path).convert("RGB")
     messages = build_messages(image, question)
 
