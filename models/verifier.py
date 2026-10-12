@@ -26,7 +26,7 @@ def verifier_prompt(question: str, candidate: CandidateTrace) -> str:
     return (
         "You are a strict visual verifier. Judge whether the proposed answer is supported by "
         "the supplied image and question. Do not rely on whether the answer merely sounds plausible. "
-        "Return exactly one JSON object with a numeric score from 0.0 to 1.0 and a short reason.\n\n"
+        "Return exactly one JSON object with a numeric score from 0.0 to 1.0 and a reason of at most 20 words.\n\n"
         f"Question: {question}\n"
         f"Candidate answer: {candidate.prediction}\n"
         f"Candidate rationale: {candidate.rationale or '(none)'}\n"
@@ -43,7 +43,7 @@ def parse_verifier_score(response: str) -> tuple:
         score = float(value["score"])
         reason = str(value.get("reason", ""))
     except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-        score_match = re.search(r"(?:score\s*[:=]\s*)([01](?:\.\d+)?)", response, flags=re.IGNORECASE)
+        score_match = re.search(r"[\"']?score[\"']?\s*[:=]\s*([01](?:\.\d+)?)", response, flags=re.IGNORECASE)
         if not score_match:
             raise ValueError(f"Verifier response has no parseable score: {response!r}")
         score = float(score_match.group(1))
@@ -68,7 +68,7 @@ class PromptedVLMVerifier:
             return_dict=True,
             return_tensors="pt",
         ).to(self.model.device)
-        output_ids = self.model.generate(**inputs, max_new_tokens=96, do_sample=False)
+        output_ids = self.model.generate(**inputs, max_new_tokens=256, do_sample=False)
         generated_ids = output_ids[:, inputs["input_ids"].shape[1] :]
         response = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
         return parse_verifier_score(response)

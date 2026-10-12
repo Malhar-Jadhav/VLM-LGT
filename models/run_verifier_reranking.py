@@ -31,7 +31,12 @@ def score_pool_records(records: list, verifier: PromptedVLMVerifier) -> list:
         scored_candidates = []
         for raw_candidate in record.get("candidates", []):
             candidate = CandidateTrace.from_dict(raw_candidate)
-            score, reason = verifier.score(_verifier_image(record, candidate), candidate.question, candidate)
+            try:
+                score, reason = verifier.score(_verifier_image(record, candidate), candidate.question, candidate)
+            except ValueError as exc:
+                score, reason = 0.0, f"PARSE_FAILED: {exc}"
+                candidate.metadata["verifier_parse_failed"] = True
+                print(f"[warn] {candidate.candidate_id}: unparseable verifier output, scored 0.0")
             candidate.verifier_score = score
             candidate.metadata["verifier_reason"] = reason
             scored_candidates.append(candidate.to_dict())

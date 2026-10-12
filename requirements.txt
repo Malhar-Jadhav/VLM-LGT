@@ -1,5 +1,5 @@
 torch>=2.2
-transformers>=4.46
+transformers>=4.57
 accelerate>=0.34
 datasets>=2.20
 pillow>=10.0
@@ -8,3 +8,4 @@ sentencepiece
 tqdm
 numpy
 qwen-vl-utils
+torchvision
